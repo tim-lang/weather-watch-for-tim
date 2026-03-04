@@ -431,7 +431,8 @@ function renderCard(dateStr, hourly) {
   // 56,57 = freezing drizzle; 66,67 = freezing rain; 71–77 = snow variants;
   // 85,86 = snow showers; also snowfall > 0
   const frozenCodes = new Set([56,57,66,67,71,73,75,77,85,86]);
-  const hasFrozen   = snowfall.some(s => s > 0) || weathercode.some(c => frozenCodes.has(c));
+  // Only flag frozen precip if temp that hour is ≤35°F — filters out model artifacts at warm temps
+  const hasFrozen = temps.some((t, h) => t <= 35 && (snowfall[h] > 0 || frozenCodes.has(weathercode[h])));
 
   const rainAlert = totalRain > THRESH.rain;
   const snowAlert = hasFrozen;
@@ -443,7 +444,7 @@ function renderCard(dateStr, hourly) {
   const rainHrs = precip.map((p,h)  => p > 0.005 ? h : -1).filter(h => h >= 0);
   const snowHrs = idx.map((_,h) => {
     const code = weathercode[h];
-    return (snowfall[h] > 0 || frozenCodes.has(code)) ? h : -1;
+    return (temps[h] <= 35 && (snowfall[h] > 0 || frozenCodes.has(code))) ? h : -1;
   }).filter(h => h >= 0);
   // Wind hours: triggered if sustained > 20 OR gust > 30 that hour
   const windHrs = windSpeed.map((w,h) =>
@@ -455,8 +456,8 @@ function renderCard(dateStr, hourly) {
   let frozenLabel = 'none';
   if (hasFrozen) {
     const types = [];
-    if (snowfall.some(s => s > 0)) types.push('snow');
-    if (weathercode.some(c => [56,57,66,67].includes(c))) types.push('freezing rain');
+    if (temps.some((t,h) => t <= 35 && snowfall[h] > 0)) types.push('snow');
+    if (temps.some((t,h) => t <= 35 && [56,57,66,67].includes(weathercode[h]))) types.push('freezing rain');
     frozenLabel = types.length ? types.join(' / ') : 'frozen precip';
   }
 

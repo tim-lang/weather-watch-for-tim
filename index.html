@@ -354,7 +354,7 @@
 <div class="legend">
   <div class="legend-item"><div class="legend-dot" style="background:var(--rain)"></div>HEAVY RAIN</div>
   <div class="legend-item"><div class="legend-dot" style="background:var(--snow)"></div>ANY FROZEN PRECIP</div>
-  <div class="legend-item"><div class="legend-dot" style="background:var(--wind)"></div>GUSTS &gt;22 mph</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--wind)"></div>WIND &gt;20 mph OR GUSTS &gt;30 mph</div>
   <div class="legend-item"><div class="legend-dot" style="background:var(--cold)"></div>TEMP &lt;30°F</div>
 </div>
 
@@ -368,10 +368,11 @@ const LAT = 45.4971, LNG = -122.5709;
 
 // Alert thresholds
 const THRESH = {
-  rain: 0.30,   // heavy rain = >0.30" cumulative in day (NWS heavy = >0.30"/hr but daily sum is a reasonable proxy)
-  snow: 0,      // any frozen precipitation at all
-  wind: 22,     // gusts > 22 mph
-  cold: 30      // temp < 30°F
+  rain: 0.30,       // heavy rain = >0.30" cumulative in day
+  snow: 0,          // any frozen precipitation at all
+  windSustained: 20, // sustained wind > 20 mph
+  windGust: 30,      // OR gusts > 30 mph
+  cold: 30          // temp < 30°F
 };
 
 function fmtHour(h) {
@@ -416,15 +417,14 @@ function renderCard(dateStr, hourly) {
 
   const temps      = idx.map(i => hourly.temperature_2m[i]);
   const precip     = idx.map(i => hourly.precipitation[i]);
-  // snowfall covers snow; freezing_rain_equivalent covers sleet/freezing rain; showers of snow type
-  // Open-Meteo: snowfall in cm, we convert. Also use weathercode to catch all frozen precip.
-  const snowfall   = idx.map(i => hourly.snowfall[i]);          // cm water equiv snowfall
+  const snowfall   = idx.map(i => hourly.snowfall[i]);
   const weathercode= idx.map(i => hourly.weathercode[i]);
+  const windSpeed  = idx.map(i => hourly.wind_speed_10m[i]);
   const gusts      = idx.map(i => hourly.wind_gusts_10m[i]);
 
   const high = Math.max(...temps), low = Math.min(...temps);
-  const totalRain  = precip.reduce((a,b) => a+b, 0);           // inches
-  const totalSnow  = snowfall.reduce((a,b) => a+b, 0);         // cm
+  const totalRain  = precip.reduce((a,b) => a+b, 0);
+  const maxWind    = Math.max(...windSpeed);
   const maxGust    = Math.max(...gusts);
 
   // Weather codes for frozen precipitation:
@@ -433,20 +433,22 @@ function renderCard(dateStr, hourly) {
   const frozenCodes = new Set([56,57,66,67,71,73,75,77,85,86]);
   const hasFrozen   = snowfall.some(s => s > 0) || weathercode.some(c => frozenCodes.has(c));
 
-  // For rain alert: use heavy rain threshold on daily total
   const rainAlert = totalRain > THRESH.rain;
-  const snowAlert = hasFrozen;              // any frozen precip at all
-  const windAlert = maxGust > THRESH.wind;
+  const snowAlert = hasFrozen;
+  const windAlert = maxWind > THRESH.windSustained || maxGust > THRESH.windGust;
   const coldAlert = low < THRESH.cold;
   const anyAlert  = rainAlert || snowAlert || windAlert || coldAlert;
 
   // Hours for timing bars
-  const rainHrs = precip.map((p,h)  => p > 0.005   ? h : -1).filter(h => h >= 0);
+  const rainHrs = precip.map((p,h)  => p > 0.005 ? h : -1).filter(h => h >= 0);
   const snowHrs = idx.map((_,h) => {
     const code = weathercode[h];
     return (snowfall[h] > 0 || frozenCodes.has(code)) ? h : -1;
   }).filter(h => h >= 0);
-  const windHrs = gusts.map((g,h)   => g > THRESH.wind ? h : -1).filter(h => h >= 0);
+  // Wind hours: triggered if sustained > 20 OR gust > 30 that hour
+  const windHrs = windSpeed.map((w,h) =>
+    (w > THRESH.windSustained || gusts[h] > THRESH.windGust) ? h : -1
+  ).filter(h => h >= 0);
   const coldHrs = temps.map((t,h)   => t < THRESH.cold ? h : -1).filter(h => h >= 0);
 
   // Snow type label
@@ -465,8 +467,8 @@ function renderCard(dateStr, hourly) {
     { icon:'❄️', label:'Frozen Precip',
       value: frozenLabel,
       alert: snowAlert, color:'snow', hours: snowHrs },
-    { icon:'💨', label:'Wind Gusts',
-      value: `${maxGust.toFixed(0)} mph`,
+    { icon:'💨', label:'Wind',
+      value: `${maxWind.toFixed(0)} mph / ${maxGust.toFixed(0)} mph gusts`,
       alert: windAlert, color:'wind', hours: windHrs },
     { icon:'🥶', label:'Low Temp',
       value: `${low.toFixed(0)}°F`,
@@ -514,7 +516,7 @@ async function init() {
       'https://api.open-meteo.com/v1/forecast',
       '?latitude=' + LAT,
       '&longitude=' + LNG,
-      '&hourly=temperature_2m,precipitation,snowfall,weathercode,wind_gusts_10m',
+      '&hourly=temperature_2m,precipitation,snowfall,weathercode,wind_speed_10m,wind_gusts_10m',
       '&temperature_unit=fahrenheit',
       '&wind_speed_unit=mph',
       '&precipitation_unit=inch',
